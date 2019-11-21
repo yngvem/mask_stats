@@ -9,6 +9,9 @@ from scipy.spatial.distance import directed_hausdorff
 from tqdm import tqdm
 
 
+__all__ = [EvaluationOutput, MaskEvaluator, MasksEvaluator]
+
+
 def label_overlap(labelled_1, labelled_2, label_1, label_2):
     """Compute overlap between `label_1` and `label_2`.
     """
