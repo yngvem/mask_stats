@@ -4,294 +4,30 @@ from numbers import Number
 from typing import Dict, List, NamedTuple
 
 import numpy as np
-from scipy.ndimage import find_objects, label, morphological_gradient
 from scipy.spatial.distance import directed_hausdorff
+from scipy.ndimage.morphology import find_objects, label
 from tqdm import tqdm
 
+from .surface_distance import (
+    compute_labelled_surface_distances,
+    compute_structure_hd,
+    compute_structure_asd,
+    compute_overall_hd,
+    compute_overall_asd,
+)
+from .overlap import (
+    compute_areas,
+    compute_coverage_fraction,
+    compute_label_overlap,
+    compute_num_detected_objects,
+    compute_overall_dice,
+    compute_pairwise_overlaps,
+    compute_relative_overlap,
+    compute_structure_accuracy,
+    compute_structure_dice
+)
 
 __all__ = ["EvaluationOutput", "MaskEvaluator", "MasksEvaluator"]
-
-
-def compute_label_overlap(labelled_1, labelled_2, label_1, label_2):
-    """Compute overlap between `label_1` and `label_2`.
-
-    Arguments
-    ---------
-    labelled_1 : np.ndarray(dtype=int)
-        Region labelled mask
-    labelled_2 : np.ndarray(dtype=int)
-        Region labelled mask
-    label_1 : int
-        Label of relevant region in labelled_1
-    label_2 : int
-        Label of relevant region in labelled_2
-
-    Returns
-    -------
-    overlap : int
-        The number of overlapping pixels between the two masks of interest.
-    """
-    labelled_1 = labelled_1 == label_1
-    labelled_2 = labelled_2 == label_2
-    return np.sum(labelled_1 * labelled_2)
-
-
-def compute_pairwise_overlaps(
-    labelled_1, labelled_2, num_labels_1, num_labels_2, locs_1, locs_2
-):
-    """Compute the overlap between two region labelled masks.
-
-    Compute all pairwise overlaps between two region-labelled images.
-
-    Arguments
-    ---------
-    labelled_1 : np.ndarray(dtype=int)
-        Region labelled mask
-    labelled_2 : np.ndarray(dtype=int)
-        Region labelled mask
-    num_labels_1 : int
-        Number of different labelled regions in labelled_1.
-    num_labels_2 : int
-        Number of different labelled regions in labelled_2.
-    locs_1 : list[slice]
-        Slices that specify the locations of the labelled regions in labelled_1
-    locs_2 : list[slice]
-        Slices that specify the locations of the labelled regions in labelled_2
-
-    Returns
-    -------
-    overlaps : np.ndarray(dtype=int, shape=(num_labels_1, num_labels_2))
-        Matrix with degree of overlap between the different labels.
-    """
-    overlaps = np.zeros((num_labels_1, num_labels_2))
-
-    # Generate iterators
-    region_info_1 = enumerate(locs_1)
-    region_info_2 = enumerate(locs_2)
-
-    for info_1, info_2 in product(region_info_1, region_info_2):
-        # Extract info from iterators
-        idx_1, location_1 = info_1
-        idx_2, location_2 = info_2
-
-        # Compute overlap
-        overlaps[idx_1, idx_2] = compute_label_overlap(
-            labelled_1[location_1], labelled_2[location_1], idx_1 + 1, idx_2 + 1
-        )
-    return overlaps
-
-
-def compute_areas(labelled, num_labels):
-    """Compute the areas of all the region-labelled masks.
-
-    Arguments
-    ---------
-    labelled : np.ndarray(dtype=int)
-        Region labelled masks
-    num_labels : int
-        Number of unique labels in the region labelled mask
-
-    Returns
-    -------
-    areas : np.ndarray(dtype=int)
-        List that contains the area of each labelled mask. Element `i` contains
-        the area of the mask with label `i+1`.
-    """
-    return np.array([np.sum(labelled == label) for label in range(1, num_labels + 1)])
-
-
-def compute_relative_overlap(areas_1, areas_2, overlap):
-    """Compute the relative overlap between each region labelled mask.
-
-    Arguments
-    ---------
-    areas_1 : np.ndarray(dtype=int, shape=(num_labels_1,))
-        Size of each mask in the first region-labelled image
-    areas_2 : np.ndarray(dtype=int, shape=(num_labels_2,))
-        Size of each mask in the second region-labelled image
-    overlap : np.ndarray(dtype=int, shape=(num_labels_1, num_labels_2))
-        Matrix with overlap between each labels of the two masks.
-        Returned by `compute_pairwise_overlaps`.
-
-    Returns
-    -------
-    relative_overlap_1 : np.ndarray(dtype=float, shape=(num_labels_1, num_labels_2))
-    relative_overlap_2 : np.ndarray(dtype=float, shape=(num_labels_1, num_labels_2))
-    """
-    return (overlap / areas_1.reshape(-1, 1), overlap / areas_2.reshape(1, -1))
-
-
-def compute_coverage_fraction(relative_overlap_1, relative_overlap_2):
-    """Compute the coverage fractions.
-
-    Arguments
-    ---------
-    relative_overlap_1 : np.ndarray(dtype=float, shape=(num_labels_1, num_labels_2))
-        The relative overlap between each label in the first mask and each label in
-        the second mask.
-    relative_overlap_2 : np.ndarray(dtype=float, shape=(num_labels_1, num_labels_2))
-        The relative overlap between each label in the second mask and each label in
-        the fist mask.
-    Returns
-    -------
-    coverage_fractions_1 : np.ndarray(dtype=float, shape=(num_labels_1))
-        The coverage fraction of each mask in the first region labelled mask
-    coverage_fractions_2 : np.ndarray(dtype=float, shape=(num_labels_2))
-        The coverage fraction of each mask in the second region labelled mask
-    """
-    return relative_overlap_1.sum(1), relative_overlap_2.sum(0)
-
-
-def _norm(x):
-    """Compute the norm of x along the last axis.
-    """
-    return np.sqrt(np.sum(np.square(x), axis=x.ndim - 1))
-
-
-def _set_distances(nonzeros_1, nonzeros_2):
-    """Compute all surface distances from one set to the other.
-    """
-    distances = np.zeros(len(nonzeros_1))
-    for i, _ in enumerate(distances):
-        distances[i] = np.min(_norm(nonzeros_1[i].reshape(1, -1) - nonzeros_2))
-    return distances
-
-
-def percentile_directed_hd(nonzeros_1, nonzeros_2, percentile):
-    distances = _directed_distances(nonzeros_1, nonzeros_2)
-    return np.percentile(distances, percentile)
-
-
-def compute_surface_distances(mask1, mask2):
-    """Return the surface distances for all points on the surface of mask1 to the surface of mask2.
-
-    Arguments
-    ---------
-    mask1 : np.ndarray
-        Boolean mask to compute distances from 
-    mask2 : np.ndarray
-        Boolean mask to compute distances to
-    """
-    structuring_el_size = tuple(3 for _ in mask1.shape)
-    grad1 = morphological_gradient(mask1.astype(int), size=structuring_el_size)
-    grad2 = morphological_gradient(mask2.astype(int), size=structuring_el_size)
-
-    nonzeros_1 = np.array(np.nonzero(grad1)).T
-    nonzeros_2 = np.array(np.nonzero(grad2)).T
-    return np.sort(_set_distances(nonzeros_1, nonzeros_2))
-
-
-def compute_labelled_surface_distances(labelled_1, labelled_2, num_labels_1, num_labels_2):
-    """Compute the surface distances for for all connected components in one mask to the whole second mask.
-    """
-    mask1 = labelled_1 != 0
-    mask2 = labelled_2 != 0
-
-    surface_distance_label_1 = []
-    for idx in range(num_labels_1):
-        surface_distance_label_1.append(
-            compute_surface_distances(labelled_1 == idx + 1, mask2)
-        )
-
-    surface_distance_label_2 = []
-    for idx in range(num_labels_2):
-        surface_distance_label_2.append(
-            compute_surface_distances(labelled_2 == idx + 1, mask1)
-        )
-
-    return surface_distance_label_1, surface_distance_label_2
-
-
-def structure_hd(
-    labelled_surface_distances_1, labelled_surface_distances_2, percentile
-):
-    """Compute the Hausdorff distance for for all connected components in one mask to the whole second mask.
-    """
-    hausdorffs_label_1 = []
-    for surface_distance in labelled_surface_distances_1:
-        hausdorffs_label_1.append(np.percentile(surface_distance, percentile))
-
-    hausdorffs_label_2 = []
-    for surface_distance in labelled_surface_distances_2:
-        hausdorffs_label_2.append(np.percentile(surface_distance, percentile))
-    return np.array(hausdorffs_label_1), np.array(hausdorffs_label_2)
-
-
-def overall_hd(
-    labelled_surface_distances_1, labelled_surface_distances_2, percentile
-):
-    hausdorff_1 = np.percentile(np.concatenate(labelled_surface_distances_1), percentile)
-    hausdorff_2 = np.percentile(np.concatenate(labelled_surface_distances_2), percentile)
-
-    return hausdorff_1, hausdorff_2
-
-
-def structure_asd(
-    labelled_surface_distances_1, labelled_surface_distances_2
-):
-    """Compute the Hausdorff distance for for all connected components in one mask to the whole second mask.
-    """
-    asd_label_1 = []
-    for surface_distance in labelled_surface_distances_1:
-        asd_label_1.append(np.mean(surface_distance))
-
-    asd_label_2 = []
-    for surface_distance in labelled_surface_distances_2:
-        asd_label_2.append(np.mean(surface_distance))
-
-    return (
-        np.array(asd_label_1),
-        np.array(asd_label_2),
-    )
-
-
-def overall_asd(
-    labelled_surface_distances_1, labelled_surface_distances_2
-):
-    asd_1 = np.mean(np.concatenate(labelled_surface_distances_1))
-    asd_2 = np.mean(np.concatenate(labelled_surface_distances_2))
-
-    return asd_1, asd_2
-
-
-def overall_dice(mask1, mask2):
-    mask1 = mask1.astype(bool)
-    mask2 = mask2.astype(bool)
-    tp = np.sum(mask1*mask2)
-
-    return 2*tp/(mask1.sum() + mask2.sum())
-
-def structure_dice(overlap, areas_1, areas_2, threshold=0):
-    """Compute the component-wise dice.
-
-    For each connected component, C, in the first mask, we find the connected
-    components in the second mask that covers a factor of at least `threshold`
-    times the area of C. Once we have these components, we compute the dice.
-    """
-
-    structure_dice_1 = []
-    for i, area in enumerate(areas_1):
-        relevant_areas_2 = 2 * overlap[i] / area > threshold
-        structure_dice_1.append(
-            2 * overlap[i].sum() / (area + areas_2[relevant_areas_2].sum())
-        )
-
-    structure_dice_2 = []
-    for i, area in enumerate(areas_2):
-        relevant_areas_1 = overlap[:, i] / area > threshold
-        structure_dice_2.append(
-            2 * overlap[:, i].sum() / (area + areas_1[relevant_areas_1].sum())
-        )
-
-    return structure_dice_1, structure_dice_2
-
-
-def num_detected_objects(relative_overlap_1, relative_overlap_2, threshold):
-    """Compute the number of objects that are covered by a fraction over the given threshold.
-    """
-    detected_object_1 = np.sum(relative_overlap_1.sum(1) > threshold)
-    detected_object_2 = np.sum(relative_overlap_2.sum(0) > threshold)
-    return detected_object_1, detected_object_2
 
 
 class EvaluationOutput(NamedTuple):
@@ -300,9 +36,50 @@ class EvaluationOutput(NamedTuple):
     undetected_metrics: Dict[str, List[Number]]
 
 
+class _MetricRegister:
+    def __init__(self):
+        self.overall_metrics = {}
+        self.structure_metrics = {}
+
+    def as_overall_metric(self, metric):
+        self.overall_metrics[metric.__name__] = metric
+        return metric
+
+    def as_structure_metric(self, metric):
+        self.structure_metrics[metric.__name__] = metric
+        return metric
+
+
+def compute_overlap_metrics(mask1, mask2, detection_threshold):
+    labelled_mask1, num_labels_mask1 = label(mask1)
+    labelled_mask2, num_labels_mask2 = label(mask1)
+
+    object_locations_mask1 = find_objects(labelled_mask1)
+    object_locations_mask2 = find_objects(labelled_mask2)
+
+    areas_mask1 = compute_areas(labelled_mask1, object_locations_mask1),
+    areas_mask2 = compute_areas(labelled_mask2, object_locations_mask2),
+
+    pairwise_overlaps = compute_pairwise_overlaps(
+        labelled_mask1, 
+        labelled_mask2, 
+        num_labels_mask1, 
+        num_labels_mask2,
+        object_locations_mask1,
+        object_locations_mask2,
+    )
+
+    relative_pairwise_overlaps = compute_relative_overlap(
+        areas_mask1, areas_mask2, pairwise_overlaps
+    )
+
+
+
 class MaskEvaluator:
     """Compute performance metrics between two binary masks.
     """
+
+    _metric_register = _MetricRegister()
 
     def __init__(self, dice_threshold=0, detection_threshold=0.3, names=None):
         """
@@ -354,159 +131,127 @@ class MaskEvaluator:
         self._cache = {}
         self._masks = tuple(value)
 
+    # ----------------- Mask attributes used by metrics ------------------ #
     @property
     def labelled(self):
-        if 'labelled' not in self._cache:
+        if "labelled" not in self._cache:
             labelled0, num_labels0 = label(self.masks[0])
             labelled1, num_labels1 = label(self.masks[1])
-            self._cache['labelled'] = (labelled0, labelled1)
-            self._cache['num_labels'] = (num_labels0, num_labels1)
-        return self._cache['labelled']
+            self._cache["labelled"] = (labelled0, labelled1)
+            self._cache["num_labels"] = (num_labels0, num_labels1)
+        return self._cache["labelled"]
 
     @property
     def num_labels(self):
-        if 'num_labels' not in self._cache:
+        if "num_labels" not in self._cache:
             labelled0, num_labels0 = label(self.masks[0])
             labelled1, num_labels1 = label(self.masks[1])
-            self._cache['labelled'] = (labelled0, labelled1)
-            self._cache['num_labels'] = (num_labels0, num_labels1)
-        return self._cache['num_labels']
+            self._cache["labelled"] = (labelled0, labelled1)
+            self._cache["num_labels"] = (num_labels0, num_labels1)
+        return self._cache["num_labels"]
 
     @property
     def locations(self):
-        if 'location' not in self._cache:
-            self._cache['locations'] = tuple(
+        if "location" not in self._cache:
+            self._cache["locations"] = tuple(
                 find_objects(labelled) for labelled in self.labelled
             )
-        return self._cache['locations']
+        return self._cache["locations"]
 
+#
     @property
     def overlap(self):
-        if 'overlap' not in self._cache:
-            self._cache['overlap'] = compute_pairwise_overlaps(
+        if "overlap" not in self._cache:
+            self._cache["overlap"] = compute_pairwise_overlaps(
                 *self.labelled, *self.num_labels, *self.locations
             )
-        return self._cache['overlap']
+        return self._cache["overlap"]
 
     @property
+    @_metric_register.as_structure_metric
     def areas(self):
-        if 'areas' not in self._cache:
-            self._cache['areas'] = (
-                compute_areas(self.labelled[0], self.num_labels[0]),
-                compute_areas(self.labelled[1], self.num_labels[1]),
-            )
-        return self._cache['areas']
+        return (
+            compute_areas(self.labelled[0], self.num_labels[0]),
+            compute_areas(self.labelled[1], self.num_labels[1]),
+        )
 
     @property
+    @_metric_register.as_structure_metric
     def relative_overlap(self):
-        if 'relative_overlap' not in self._cache:
-            self._cache['relative_overlap'] = compute_relative_overlap(*self.areas, self.overlap)
-        return self._cache['relative_overlap']
+        return compute_relative_overlap(*self.areas, self.overlap)
 
     @property
     def surface_distances(self):
-        if 'surface_distances' not in self._cache:
-            self._cache['surface_distances'] = compute_labelled_surface_distances(
+        if "surface_distances" not in self._cache:
+            self._cache["surface_distances"] = compute_labelled_surface_distances(
                 *self.labelled, *self.num_labels
             )
-        return self._cache['surface_distances']
+        return self._cache["surface_distances"]
 
+    # ----------------- Metrics ------------------ #
     @property
+    @_metric_register.as_structure_metric
     def structure_hd(self):
-        if 'structure_hd' not in self._cache:
-            self._cache['structure_hd'] = structure_hd(
-                *self.surface_distances, percentile=100
-            )
-        return self._cache['structure_hd']
+        return structure_hd(*self.surface_distances, percentile=100)
 
     @property
+    @_metric_register.as_structure_metric
     def structure_hd95(self):
-        if 'structure_hd95' not in self._cache:
-            self._cache['structure_hd95'] = structure_hd(
-                *self.surface_distances, percentile=95
-            )
-        return self._cache['structure_hd95']
+        return structure_hd(*self.surface_distances, percentile=95)
 
     @property
+    @_metric_register.as_structure_metric
     def structure_asd(self):
-        if 'structure_asd' not in self._cache:
-            self._cache['structure_asd'] = structure_asd(
-                *self.surface_distances
-            )
-        return self._cache['structure_asd']
+        return structure_asd(*self.surface_distances)
 
     @property
+    @_metric_register.as_structure_metric
     def structure_msd(self):
-        if 'structure_msd' not in self._cache:
-            self._cache['structure_msd'] = structure_hd(
-                *self.surface_distances, percentile=50
-            )
-        return self._cache['structure_msd']
+        return structure_hd(*self.surface_distances, percentile=50)
 
     @property
-    def structure_msd(self):
-        if 'structure_msd' not in self._cache:
-            self._cache['structure_msd'] = structure_hd(
-                *self.surface_distances, percentile=50
-            )
-        return self._cache['structure_msd']
-
-    @property
+    @_metric_register.as_overall_metric
     def overall_hd(self):
-        if 'overall_hd' not in self._cache:
-            self._cache['overall_hd'] = overall_hd(
-                *self.surface_distances, percentile=100
-            )
-        return self._cache['overall_hd']
+        return overall_hd(*self.surface_distances, percentile=100)
 
     @property
+    @_metric_register.as_overall_metric
     def overall_hd95(self):
-        if 'overall_hd95' not in self._cache:
-            self._cache['overall_hd95'] = overall_hd(
-                *self.surface_distances, percentile=95
-            )
-        return self._cache['overall_hd95']
+        return overall_hd(*self.surface_distances, percentile=95)
 
     @property
+    @_metric_register.as_overall_metric
     def overall_asd(self):
-        if 'overall_asd' not in self._cache:
-            self._cache['overall_asd'] = overall_asd(
-                *self.surface_distances
-            )
-        return self._cache['overall_asd']
+        return overall_asd(*self.surface_distances)
 
     @property
+    @_metric_register.as_overall_metric
     def overall_msd(self):
-        if 'overall_msd' not in self._cache:
-            self._cache['overall_msd'] = overall_hd(
-                *self.surface_distances, percentile=50
-            )
-        return self._cache['overall_msd']
+        return overall_hd(*self.surface_distances, percentile=50)
 
     @property
+    @_metric_register.as_structure_metric
     def structure_dice(self):
-        if 'structure_dice' not in self._cache:
-            self._cache['structure_dice'] = structure_dice(self.overlap, *self.areas, self.dice_threshold)
-        return self._cache['structure_dice']
+        return structure_dice(self.overlap, *self.areas, self.dice_threshold)
 
     @property
+    @_metric_register.as_overall_metric
     def overall_dice(self):
-        if 'overall_dice' not in self._cache:
-            self._cache['overall_dice'] = overall_dice(self.masks[0], self.masks[1])
-        return self._cache['overall_dice']
+        return overall_dice(self.masks[0], self.masks[1])
 
     @property
+    @_metric_register.as_overall_metric
     def num_detected_objects(self):
         return num_detected_objects(*self.relative_overlap, self.detection_threshold)
 
     @property
+    @_metric_register.as_structure_metric
     def coverage_fraction(self):
-        if 'coverage_fraction' not in self._cache:
-            self._cache['coverage_fraction'] = compute_coverage_fraction(*self.relative_overlap)
-        return self._cache['coverage_fraction']
+        return compute_coverage_fraction(*self.relative_overlap)
 
+    # ----------------- Utility methods ------------------ #
     @property
-    def detected_mask(self):
+    def is_detected_mask(self):
         return (
             self.coverage_fraction[0] > self.detection_threshold,
             self.coverage_fraction[1] > self.detection_threshold,
@@ -515,12 +260,12 @@ class MaskEvaluator:
     def get_detected(self, metric):
         detected_metric_0 = {
             i: metric[0][i]
-            for i, detected in enumerate(self.detected_mask[0])
+            for i, detected in enumerate(self.is_detected_mask[0])
             if detected
         }
         detected_metric_1 = {
             i: metric[1][i]
-            for i, detected in enumerate(self.detected_mask[1])
+            for i, detected in enumerate(self.is_detected_mask[1])
             if detected
         }
         return detected_metric_0, detected_metric_1
@@ -528,12 +273,12 @@ class MaskEvaluator:
     def get_undetected(self, metric):
         undetected_metric_0 = {
             i: metric[0][i]
-            for i, detected in enumerate(self.detected_mask[0])
+            for i, detected in enumerate(self.is_detected_mask[0])
             if not detected
         }
         undetected_metric_1 = {
             i: metric[1][i]
-            for i, detected in enumerate(self.detected_mask[1])
+            for i, detected in enumerate(self.is_detected_mask[1])
             if not detected
         }
         return undetected_metric_0, undetected_metric_1
@@ -541,17 +286,31 @@ class MaskEvaluator:
     def __getattr__(self, name):
         if name.startswith("detected_"):
             name_idx = len("detected_")
-            return self.get_detected(getattr(self, name[name_idx:]))
+            return self.get_detected(getattr([name[name_idx:]]))
         elif name.startswith("undetected_"):
             name_idx = len("undetected_")
-            return self.get_undetected(getattr(self, name[name_idx:]))
+            return self.get_undetected(getattr([name[name_idx:]]))
         else:
             raise AttributeError(f"'{type(self)}' object has no attribute '{name}'")
 
     @property
     def detected_metrics(self):
+        metrics = {}
+        for metric_name in self._metric_register.structure_metrics:
+            current_metrics = getattr(f"detected_{metric_name}")
+
+            metrics[f"detected_{metric_name}_{self.names[0]}"] = list(
+                current_metrics[0].values()
+            )
+            metrics[f"detected_{metric_name}_{self.names[1]}"] = list(
+                current_metrics[1].values()
+            )
+
+        return metrics
         return {
-            f"detected_structure_dice_{self.names[0]}": list(self.detected_structure_dice[0].values()),
+            f"detected_structure_dice_{self.names[0]}": list(
+                self.get_detected_structure_dice[0].values()
+            ),
             f"detected_areas_{self.names[0]}": list(self.detected_areas[0].values()),
             f"detected_coverage_fraction_{self.names[0]}": list(
                 self.detected_coverage_fraction[0].values()
@@ -568,7 +327,9 @@ class MaskEvaluator:
             f"detected_structure_structure_asd_{self.names[0]}_{self.names[1]}": list(
                 self.detected_structure_asd[0].values()
             ),
-            f"detected_structure_dice_{self.names[1]}": list(self.detected_structure_dice[1].values()),
+            f"detected_structure_dice_{self.names[1]}": list(
+                self.detected_structure_dice[1].values()
+            ),
             f"detected_areas_{self.names[1]}": list(self.detected_areas[1].values()),
             f"detected_coverage_fraction_{self.names[1]}": list(
                 self.detected_coverage_fraction[1].values()
@@ -589,11 +350,25 @@ class MaskEvaluator:
 
     @property
     def undetected_metrics(self):
+        metrics = {}
+        for metric_name in self._metric_register.structure_metrics:
+            current_metrics = getattr(f"undetected_{metric_name}")
+
+            metrics[f"undetected_{metric_name}_{self.names[0]}"] = list(
+                current_metrics[0].values()
+            )
+            metrics[f"undetected_{metric_name}_{self.names[1]}"] = list(
+                current_metrics[1].values()
+            )
+
+        return metrics
         return {
             f"undetected_structure_dice_{self.names[0]}": list(
                 self.undetected_structure_dice[0].values()
             ),
-            f"undetected_areas_{self.names[0]}": list(self.undetected_areas[0].values()),
+            f"undetected_areas_{self.names[0]}": list(
+                self.undetected_areas[0].values()
+            ),
             f"undetected_coverage_fraction_{self.names[0]}": list(
                 self.undetected_coverage_fraction[0].values()
             ),
@@ -609,8 +384,12 @@ class MaskEvaluator:
             f"undetected_structure_asd_{self.names[0]}_{self.names[1]}": list(
                 self.undetected_structure_asd[0].values()
             ),
-            f"undetected_structure_dice_{self.names[1]}": list(self.undetected_structure_dice[1].values()),
-            f"undetected_areas_{self.names[1]}": list(self.undetected_areas[1].values()),
+            f"undetected_structure_dice_{self.names[1]}": list(
+                self.undetected_structure_dice[1].values()
+            ),
+            f"undetected_areas_{self.names[1]}": list(
+                self.undetected_areas[1].values()
+            ),
             f"undetected_coverage_fraction_{self.names[1]}": list(
                 self.undetected_coverage_fraction[1].values()
             ),
@@ -644,17 +423,16 @@ class MaskEvaluator:
             ),
         }
 
-    @property
-    def summary_statistics(self):
+    def get_summary_statistics(self):
         return {
             f"overall_hd_{self.names[0]}_{self.names[1]}": self.overall_hd[0],
             f"overall_hd95_{self.names[0]}_{self.names[1]}": self.overall_hd95[0],
-            f"overall_asd{self.names[0]}_{self.names[1]}": self.overall_asd[0],
-            f"overall_msd{self.names[0]}_{self.names[1]}": self.overall_msd[0],
+            f"overall_asd_{self.names[0]}_{self.names[1]}": self.overall_asd[0],
+            f"overall_msd_{self.names[0]}_{self.names[1]}": self.overall_msd[0],
             f"overall_hd_{self.names[1]}_{self.names[0]}": self.overall_hd[1],
             f"overall_hd95_{self.names[1]}_{self.names[0]}": self.overall_hd95[1],
-            f"overall_asd{self.names[1]}_{self.names[0]}": self.overall_asd[1],
-            f"overall_msd{self.names[1]}_{self.names[0]}": self.overall_msd[1],
+            f"overall_asd_{self.names[1]}_{self.names[0]}": self.overall_asd[1],
+            f"overall_msd_{self.names[1]}_{self.names[0]}": self.overall_msd[1],
             f"overall_dice": self.overall_dice,
             f"num_objects_{self.names[0]}": self.num_labels[0],
             f"num_objects_{self.names[1]}": self.num_labels[1],
@@ -683,7 +461,9 @@ class MaskEvaluator:
     def evaluate(self, mask1, mask2):
         self.masks = (mask1, mask2)
         return EvaluationOutput(
-            self.summary_statistics, self.detected_metrics, self.undetected_metrics
+            self.get_summary_statistics(),
+            self.detected_metrics,
+            self.undetected_metrics,
         )
 
 
@@ -716,6 +496,27 @@ class MasksEvaluator:
         return EvaluationOutput(
             self.summaries, self.detected_metrics, self.undetected_metrics
         )
+
+
+def evaluate_all_masks(masks1, masks2, progress=True, *args, **kwargs):
+    """Evaluate all input masks.
+    """
+    mask_summaries = defaultdict(list)
+    all_detected_metrics = defaultdict(list)
+    all_undetected_metrics = defaultdict(list)
+
+    for mask1, mask2 in zip(tqdm(masks1), masks2):
+        evaluator = MaskEvaluator(*args, **kwargs)
+        for metric, value in evaluator.summary_statistics.items():
+            summaries[metric].append(value)
+
+        for metric, values in evaluator.detected_metrics.items():
+            detected_metrics[metric] += list(values)
+
+        for metric, values in evaluator.undetected_metrics.items():
+            undetected_metrics[metric] += list(values)
+
+    return EvaluationOutput(mask_summaries, detected_metrics, undetected_metrics)
 
 
 if __name__ == "__main__":
