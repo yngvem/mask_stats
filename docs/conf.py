@@ -21,9 +21,10 @@
 import os
 import sys
 
+import mask_stats
+
 sys.path.insert(0, os.path.abspath(".."))
 
-import mask_stats
 
 # -- General configuration ---------------------------------------------
 
