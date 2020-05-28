@@ -61,7 +61,7 @@ def compute_labelled_surface_distances(
     return surface_distance_label_1, surface_distance_label_2
 
 
-def compute_structure_hd(
+def compute_structure_percentile_surface_distances(
     labelled_surface_distances_1, labelled_surface_distances_2, percentile
 ):
     """Compute the Hausdorff distance for for all connected components in one mask to the whole second mask.
@@ -76,7 +76,7 @@ def compute_structure_hd(
     return np.array(hausdorffs_label_1), np.array(hausdorffs_label_2)
 
 
-def compute_overall_hd(
+def compute_overall_percentile_surface_distances(
     labelled_surface_distances_1, labelled_surface_distances_2, percentile
 ):
     hausdorff_1 = np.percentile(
@@ -89,7 +89,7 @@ def compute_overall_hd(
     return hausdorff_1, hausdorff_2
 
 
-def compute_structure_asd(labelled_surface_distances_1, labelled_surface_distances_2):
+def compute_structure_average_surface_distances(labelled_surface_distances_1, labelled_surface_distances_2):
     """Compute the Hausdorff distance for for all connected components in one mask to the whole second mask.
     """
     asd_label_1 = []
@@ -106,7 +106,7 @@ def compute_structure_asd(labelled_surface_distances_1, labelled_surface_distanc
     )
 
 
-def compute_overall_asd(labelled_surface_distances_1, labelled_surface_distances_2):
+def compute_overall_average_surface_distances(labelled_surface_distances_1, labelled_surface_distances_2):
     asd_1 = np.mean(np.concatenate(labelled_surface_distances_1))
     asd_2 = np.mean(np.concatenate(labelled_surface_distances_2))
 

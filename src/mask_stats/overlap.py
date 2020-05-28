@@ -1,4 +1,5 @@
 from itertools import product
+
 import numpy as np
 
 
@@ -62,16 +63,20 @@ def compute_pairwise_overlaps(
     for info_1, info_2 in product(region_info_1, region_info_2):
         # Extract info from iterators
         idx_1, location_1 = info_1
-        idx_2, location_2 = info_2
+        idx_2 = info_2[0]
 
-        # Compute overlap
+        # Compute overlap:
+        ## We have location_1 for both of these regions since
+        ## we want to discover the overlap and then it suffices
+        ## to look at the bounding box for one of the structures
+        ## since there will be no overlap outside this bounding box
         overlaps[idx_1, idx_2] = compute_label_overlap(
-            labelled_1[location_1], labelled_2[location_2], idx_1 + 1, idx_2 + 1
+            labelled_1[location_1], labelled_2[location_1], idx_1 + 1, idx_2 + 1
         )
     return overlaps
 
 
-def compute_areas(labelled, num_labels):
+def compute_volumes(labelled, num_labels):
     """Compute the areas of all the region-labelled masks.
 
     Arguments
@@ -90,7 +95,7 @@ def compute_areas(labelled, num_labels):
     return np.array([np.sum(labelled == label) for label in range(1, num_labels + 1)])
 
 
-def compute_relative_overlap(areas_1, areas_2, overlap):
+def compute_relative_overlaps(areas_1, areas_2, overlap):
     """Compute the relative overlap between each region labelled mask.
 
     Arguments
