@@ -68,7 +68,7 @@ def compute_pairwise_overlaps(
         # Compute overlap:
         ## We have location_1 for both of these regions since
         ## we want to discover the overlap and then it suffices
-        ## to look at the bounding box for one of the structures
+        ## to look at the bounding box for one of the objects
         ## since there will be no overlap outside this bounding box
         overlaps[idx_1, idx_2] = compute_label_overlap(
             labelled_1[location_1], labelled_2[location_1], idx_1 + 1, idx_2 + 1
@@ -77,7 +77,7 @@ def compute_pairwise_overlaps(
 
 
 def compute_volumes(labelled, num_labels):
-    """Compute the areas of all the region-labelled masks.
+    """Compute the volumes of all the region-labelled masks.
 
     Arguments
     ---------
@@ -88,21 +88,21 @@ def compute_volumes(labelled, num_labels):
 
     Returns
     -------
-    areas : np.ndarray(dtype=int)
-        List that contains the area of each labelled mask. Element `i` contains
-        the area of the mask with label `i+1`.
+    volumes : np.ndarray(dtype=int)
+        List that contains the volume of each labelled mask. Element `i` contains
+        the volume of the mask with label `i+1`.
     """
     return np.array([np.sum(labelled == label) for label in range(1, num_labels + 1)])
 
 
-def compute_relative_overlaps(areas_1, areas_2, overlap):
+def compute_relative_overlaps(volumes_1, volumes_2, overlap):
     """Compute the relative overlap between each region labelled mask.
 
     Arguments
     ---------
-    areas_1 : np.ndarray(dtype=int, shape=(num_labels_1,))
+    volumes_1 : np.ndarray(dtype=int, shape=(num_labels_1,))
         Size of each mask in the first region-labelled image
-    areas_2 : np.ndarray(dtype=int, shape=(num_labels_2,))
+    volumes_2 : np.ndarray(dtype=int, shape=(num_labels_2,))
         Size of each mask in the second region-labelled image
     overlap : np.ndarray(dtype=int, shape=(num_labels_1, num_labels_2))
         Matrix with overlap between each labels of the two masks.
@@ -113,7 +113,7 @@ def compute_relative_overlaps(areas_1, areas_2, overlap):
     relative_overlap_1 : np.ndarray(dtype=float, shape=(num_labels_1, num_labels_2))
     relative_overlap_2 : np.ndarray(dtype=float, shape=(num_labels_1, num_labels_2))
     """
-    return (overlap / areas_1.reshape(-1, 1), overlap / areas_2.reshape(1, -1))
+    return (overlap / volumes_1.reshape(-1, 1), overlap / volumes_2.reshape(1, -1))
 
 
 def compute_coverage_fraction(relative_overlap_1, relative_overlap_2):
@@ -145,29 +145,29 @@ def compute_overall_dice(mask1, mask2):
     return 2 * tp / (mask1.sum() + mask2.sum())
 
 
-def compute_structure_dice(overlap, areas_1, areas_2, threshold=0):
+def compute_object_dice(overlap, volumes_1, volumes_2, threshold=0):
     """Compute the component-wise dice.
 
     For each connected component, C, in the first mask, we find the connected
     components in the second mask that covers a factor of at least `threshold`
-    times the area of C. Once we have these components, we compute the dice.
+    times the volume of C. Once we have these components, we compute the dice.
     """
 
-    structure_dice_1 = []
-    for i, area in enumerate(areas_1):
-        relevant_areas_2 = 2 * overlap[i] / area > threshold
-        structure_dice_1.append(
-            2 * overlap[i].sum() / (area + areas_2[relevant_areas_2].sum())
+    object_dice_1 = []
+    for i, volume in enumerate(volumes_1):
+        relevant_volumes_2 = 2 * overlap[i] / volume > threshold
+        object_dice_1.append(
+            2 * overlap[i].sum() / (volume + volumes_2[relevant_volumes_2].sum())
         )
 
-    structure_dice_2 = []
-    for i, area in enumerate(areas_2):
-        relevant_areas_1 = overlap[:, i] / area > threshold
-        structure_dice_2.append(
-            2 * overlap[:, i].sum() / (area + areas_1[relevant_areas_1].sum())
+    object_dice_2 = []
+    for i, volume in enumerate(volumes_2):
+        relevant_volumes_1 = overlap[:, i] / volume > threshold
+        object_dice_2.append(
+            2 * overlap[:, i].sum() / (volume + volumes_1[relevant_volumes_1].sum())
         )
 
-    return structure_dice_1, structure_dice_2
+    return object_dice_1, object_dice_2
 
 
 def compute_num_detected_objects(relative_overlap_1, relative_overlap_2, threshold):
@@ -178,7 +178,7 @@ def compute_num_detected_objects(relative_overlap_1, relative_overlap_2, thresho
     return detected_object_1, detected_object_2
 
 
-def compute_structure_accuracy(relative_overlap_1, relative_overlap_2, threshold):
+def compute_object_accuracy(relative_overlap_1, relative_overlap_2, threshold):
     accuracy_1 = np.mean(relative_overlap_1.sum(1) > threshold)
     accuracy_2 = np.mean(relative_overlap_2.sum(0) > threshold)
     return accuracy_1, accuracy_2

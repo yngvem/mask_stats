@@ -1,7 +1,11 @@
+from collections import Counter
+
 import numpy as np
 import pytest
+from scipy.spatial.distance import directed_hausdorff
+from scipy.ndimage import morphological_gradient, label
 
-from mask_stats import *
+from mask_stats import compute_all_evaluations_for_mask_pairs
 
 TEMPLATE1 = np.array(
     [
@@ -28,51 +32,86 @@ TEMPLATE2 = np.array(
 
 
 def test_metrics():
-    f1, f2 = compute_mask_overlap_features(TEMPLATE1, TEMPLATE2)
-    compute_structurewise_metrics(f1, f2)
-    overall_metrics(f1, f2, 0.5)
+    compute_all_evaluations_for_mask_pairs([TEMPLATE1], [TEMPLATE2])
 
 
-"""
-@pytest.fixture
-def evaluator():
-    me = MaskEvaluator(detection_threshold=0.5)
-    me.evaluate(TEMPLATE1, TEMPLATE2)
-    return me
+def test_correct_num_labels():
+    eval_mask1, eval_mask2 = compute_all_evaluations_for_mask_pairs([TEMPLATE1], [TEMPLATE2])
+    assert len(eval_mask1['object_wise']['mask_num']) == 4
+    assert len(eval_mask2['object_wise']['mask_num']) == 4
 
 
-def test_correct_num_labels(evaluator):
-    assert evaluator.num_detected_objects[0] == 3
-    assert evaluator.num_detected_objects[1] == 2
+def test_coverage_fractions():
+    eval_mask1, eval_mask2 = compute_all_evaluations_for_mask_pairs([TEMPLATE1], [TEMPLATE2])
+    cfracs1 = Counter(eval_mask1['object_wise']['coverage_fraction'])
+    assert cfracs1[1] == 3
+    assert cfracs1[0] == 1
+    
+    cfracs2 = Counter(eval_mask2['object_wise']['coverage_fraction'])
+    assert cfracs2[1] == 2
+    assert cfracs2[1/3] == 1
+    assert cfracs2[0] == 1
 
 
-def test_detection_mask_has_correct_length(evaluator):
-    assert sum(evaluator.detected_mask[0]) == evaluator.num_detected_objects[0]
-    assert sum(evaluator.detected_mask[1]) == evaluator.num_detected_objects[1]
+def test_object_accuracy():
+    eval_mask1, eval_mask2 = compute_all_evaluations_for_mask_pairs([TEMPLATE1], [TEMPLATE2], overlap_threshold=0.5)
+    assert eval_mask1['overall']['object_accuracy'][0] == 3/4
+    assert eval_mask2['overall']['object_accuracy'][0] == 2/4
+
+    eval_mask1, eval_mask2 = compute_all_evaluations_for_mask_pairs([TEMPLATE1], [TEMPLATE2], overlap_threshold=0.1)
+    assert eval_mask1['overall']['object_accuracy'][0] == 3/4
+    assert eval_mask2['overall']['object_accuracy'][0] == 3/4
 
 
-def test_detected_metric_has_correct_length(evaluator):
-    assert len(evaluator.detected_structure_hd[0]) == evaluator.num_detected_objects[0]
-    assert len(evaluator.detected_structure_hd[1]) == evaluator.num_detected_objects[1]
+def test_hausdorff_distance():
+    eval_mask1, eval_mask2 = compute_all_evaluations_for_mask_pairs([TEMPLATE1], [TEMPLATE2], overlap_threshold=0.5)
+
+    structuring_el_size = tuple(3 for _ in TEMPLATE1.shape)
+    grad1 = morphological_gradient(TEMPLATE1, size=structuring_el_size)
+    grad2 = morphological_gradient(TEMPLATE2, size=structuring_el_size)
+    grad1_nnz = np.array(np.nonzero(grad1)).T
+    grad2_nnz = np.array(np.nonzero(grad2)).T
+
+    hd_scipy1 = directed_hausdorff(grad1_nnz, grad2_nnz)[0]
+    assert hd_scipy1 == eval_mask1['overall']['hausdorff_distance'][0]
+    hd_scipy2 = directed_hausdorff(grad2_nnz, grad1_nnz)[0]
+    assert hd_scipy2 == eval_mask2['overall']['hausdorff_distance'][0]
 
 
-def test_undetected_metric_has_correct_length(evaluator):
-    assert (
-        len(evaluator.undetected_structure_hd[0])
-        == evaluator.num_labels[0] - evaluator.num_detected_objects[0]
+def test_labelled_hausdorff_distance():
+    eval_mask1, eval_mask2 = compute_all_evaluations_for_mask_pairs(
+        [TEMPLATE1], [TEMPLATE2], overlap_threshold=0.5
     )
-    assert (
-        len(evaluator.undetected_structure_hd[1])
-        == evaluator.num_labels[1] - evaluator.num_detected_objects[1]
-    )
 
+    structuring_el_size = tuple(3 for _ in TEMPLATE1.shape)
+    labelled_1, num_labels_1 = label(TEMPLATE1)
+    object_hausdorffs_1 = []
+    for label_id in range(1, num_labels_1+1):
+        mask = (labelled_1 == label_id).astype(int)
 
-def test_detected_dice_is_correct(evaluator):
-    assert set(evaluator.detected_structure_dice[0].values()) == {1, 1, (2 / (1 + 3))}
-    assert set(evaluator.detected_structure_dice[1].values()) == {1, 1}
+        grad1 = morphological_gradient(mask, size=structuring_el_size)
+        grad2 = morphological_gradient(TEMPLATE2, size=structuring_el_size)
+        grad1_nnz = np.array(np.nonzero(grad1)).T
+        grad2_nnz = np.array(np.nonzero(grad2)).T
 
+        hd_scipy1 = directed_hausdorff(grad1_nnz, grad2_nnz)[0]
 
-def test_coverage_fraction_is_correct(evaluator):
-    assert sorted(evaluator.coverage_fraction[0]) == [0, 1, 1, 1]
-    assert sorted(evaluator.coverage_fraction[1]) == [0, 1 / 3, 1, 1]
-"""
+        object_hausdorffs_1.append(hd_scipy1)
+
+    assert Counter(eval_mask1['object_wise']['hausdorff_distance']) == Counter(object_hausdorffs_1)
+
+    labelled_2, num_labels_2 = label(TEMPLATE2)
+    object_hausdorffs_2 = []
+    for label_id in range(1, num_labels_2+1):
+        mask = (labelled_2 == label_id).astype(int)
+
+        grad1 = morphological_gradient(mask, size=structuring_el_size)
+        grad2 = morphological_gradient(TEMPLATE1, size=structuring_el_size)
+        grad1_nnz = np.array(np.nonzero(grad1)).T
+        grad2_nnz = np.array(np.nonzero(grad2)).T
+
+        hd_scipy2 = directed_hausdorff(grad1_nnz, grad2_nnz)[0]
+
+        object_hausdorffs_2.append(hd_scipy2)
+
+    assert Counter(eval_mask2['object_wise']['hausdorff_distance']) == Counter(object_hausdorffs_2)

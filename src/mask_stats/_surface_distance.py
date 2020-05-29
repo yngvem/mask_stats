@@ -61,7 +61,7 @@ def compute_labelled_surface_distances(
     return surface_distance_label_1, surface_distance_label_2
 
 
-def compute_structure_percentile_surface_distances(
+def compute_object_percentile_surface_distances(
     labelled_surface_distances_1, labelled_surface_distances_2, percentile
 ):
     """Compute the Hausdorff distance for for all connected components in one mask to the whole second mask.
@@ -89,7 +89,7 @@ def compute_overall_percentile_surface_distances(
     return hausdorff_1, hausdorff_2
 
 
-def compute_structure_average_surface_distances(labelled_surface_distances_1, labelled_surface_distances_2):
+def compute_object_average_surface_distances(labelled_surface_distances_1, labelled_surface_distances_2):
     """Compute the Hausdorff distance for for all connected components in one mask to the whole second mask.
     """
     asd_label_1 = []
