@@ -15,7 +15,7 @@ Installation instructions
 Usage
 -----
 
-.. code::
+.. code:: python
 
         from mask_stats import compute_evaluations_for_mask_pairs
 
