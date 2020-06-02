@@ -23,3 +23,10 @@ Usage
         pred_masks = [pred1, pred2, ..., predN]
 
         true_eval, pred_eval = compute_evaluations_for_mask_pairs(true_masks, pred_masks)
+
+To do:
+------
+
+ * Documentation
+ * More tests
+ * Function to evaluate single mask pair
