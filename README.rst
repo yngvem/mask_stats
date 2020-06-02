@@ -6,17 +6,18 @@ Compute summary statistics between two binary masks.
 
 Installation instructions
 -------------------------
-```
-pip install mask_stats
-```
+
+.. code::
+    pip install mask_stats
+
 
 Usage
 -----
-```
-from mask_stats import compute_evaluations_for_mask_pairs
 
-true_masks = [mask1, mask2, ..., maskN]
-pred_masks = [pred1, pred2, ..., predN]
+.. code::
+        from mask_stats import compute_evaluations_for_mask_pairs
 
-true_eval, pred_eval = compute_evaluations_for_mask_pairs(true_masks, pred_masks)
-```
+        true_masks = [mask1, mask2, ..., maskN]
+        pred_masks = [pred1, pred2, ..., predN]
+
+        true_eval, pred_eval = compute_evaluations_for_mask_pairs(true_masks, pred_masks)
