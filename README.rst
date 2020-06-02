@@ -8,6 +8,7 @@ Installation instructions
 -------------------------
 
 .. code::
+
     pip install mask_stats
 
 
@@ -15,6 +16,7 @@ Usage
 -----
 
 .. code::
+
         from mask_stats import compute_evaluations_for_mask_pairs
 
         true_masks = [mask1, mask2, ..., maskN]
