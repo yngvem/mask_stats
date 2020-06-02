@@ -27,6 +27,6 @@ Usage
 To do:
 ------
 
- * Documentation
- * More tests
- * Function to evaluate single mask pair
+* Documentation
+* More tests
+* Function to evaluate single mask pair
