@@ -2,7 +2,7 @@
 Mask stats
 ==========
 
-Compute summary statistics between two binary masks.
+Compute summary statistics between two sets of N-dimensional binary masks.
 
 Installation instructions
 -------------------------
