@@ -200,7 +200,7 @@ def _compute_nonoverlapping_means(object_wise_metrics, overlap_threshold):
     )
 
 
-def compute_all_evaluations_for_mask_pairs(
+def compute_evaluations_for_mask_pairs(
     mask_list_1, mask_list_2, overlap_threshold=0.5, show_progress=True
 ):
     object_wise_metrics_1 = defaultdict(list)
@@ -241,8 +241,8 @@ def compute_all_evaluations_for_mask_pairs(
         object_wise_metrics_1['average_surface_distance'].extend(asd1)
         object_wise_metrics_2['average_surface_distance'].extend(asd2)
 
-        object_wise_metrics_1['mask_num'] = [pair_num for _ in asd1]
-        object_wise_metrics_2['mask_num'] = [pair_num for _ in asd2]
+        object_wise_metrics_1['mask_num'].extend([pair_num for _ in asd1])
+        object_wise_metrics_2['mask_num'].extend([pair_num for _ in asd2])
 
         dice = evaluator.overall.compute_dice()
         overall_metrics_1['dice'].append(dice)
