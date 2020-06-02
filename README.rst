@@ -2,31 +2,21 @@
 Mask stats
 ==========
 
-
-.. image:: https://img.shields.io/travis/yngvem/mask_stats.svg
-        :target: https://travis-ci.org/yngvem/mask_stats
-
-.. image:: https://readthedocs.org/projects/mask-stats/badge/?version=latest
-        :target: https://mask-stats.readthedocs.io/en/latest/?badge=latest
-        :alt: Documentation Status
-
-
 Compute summary statistics between two binary masks.
 
+Installation instructions
+-------------------------
+```
+pip install mask_stats
+```
 
-* Free software: MIT license
-* Documentation: https://mask-stats.readthedocs.io.
+Usage
+-----
+```
+from mask_stats import compute_evaluations_for_mask_pairs
 
+true_masks = [mask1, mask2, ..., maskN]
+pred_masks = [pred1, pred2, ..., predN]
 
-Features
---------
-
-* TODO
-
-Credits
--------
-
-This package was created with Cookiecutter_ and the `audreyr/cookiecutter-pypackage`_ project template.
-
-.. _Cookiecutter: https://github.com/audreyr/cookiecutter
-.. _`audreyr/cookiecutter-pypackage`: https://github.com/audreyr/cookiecutter-pypackage
+true_eval, pred_eval = compute_evaluations_for_mask_pairs(true_masks, pred_masks)
+```
