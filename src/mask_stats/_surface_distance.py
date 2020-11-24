@@ -2,6 +2,15 @@ import numpy as np
 from scipy.ndimage import morphological_gradient
 
 
+def _is_iterable(x):
+    try:
+        iter(x)
+    except TypeError:
+        return False
+    else:
+        return True
+
+
 def _norm_along_last_axis(x):
     """Compute the norm of x along the last axis.
     """
@@ -19,7 +28,7 @@ def _compute_set_distances(nonzeros_1, nonzeros_2):
     return distances
 
 
-def compute_surface_distances(mask1, mask2):
+def compute_surface_distances(mask1, mask2, voxel_dimensions=1):
     """Return the surface distances for all points on the surface of mask1 to the surface of mask2.
 
     Arguments
@@ -28,18 +37,24 @@ def compute_surface_distances(mask1, mask2):
         Boolean mask to compute distances from 
     mask2 : np.ndarray
         Boolean mask to compute distances to
+    voxel_dimensions : iterable or numeric
+        Voxel size, for anisotropic voxels, use an iterable of same length as the image dimensions.
     """
     structuring_el_size = tuple(3 for _ in mask1.shape)
     grad1 = morphological_gradient(mask1.astype(int), size=structuring_el_size)
     grad2 = morphological_gradient(mask2.astype(int), size=structuring_el_size)
 
-    nonzeros_1 = np.array(np.nonzero(grad1)).T
-    nonzeros_2 = np.array(np.nonzero(grad2)).T
+    if not _is_iterable(voxel_dimensions):
+        voxel_dimensions = [voxel_dimensions for _ in mask1.shape]
+    voxel_dimensions = np.array(voxel_dimensions).reshape(1, -1)
+
+    nonzeros_1 = np.array(np.nonzero(grad1)).T * voxel_dimensions
+    nonzeros_2 = np.array(np.nonzero(grad2)).T * voxel_dimensions
     return np.sort(_compute_set_distances(nonzeros_1, nonzeros_2))
 
 
 def compute_labelled_surface_distances(
-    labelled_1, labelled_2, num_labels_1, num_labels_2
+    labelled_1, labelled_2, num_labels_1, num_labels_2, voxel_dimensions=1
 ):
     """Compute the surface distances for for all connected components in one mask to the whole second mask.
     """
@@ -49,13 +64,13 @@ def compute_labelled_surface_distances(
     surface_distance_label_1 = []
     for idx in range(num_labels_1):
         surface_distance_label_1.append(
-            compute_surface_distances(labelled_1 == idx + 1, mask2)
+            compute_surface_distances(labelled_1 == idx + 1, mask2, voxel_dimensions)
         )
 
     surface_distance_label_2 = []
     for idx in range(num_labels_2):
         surface_distance_label_2.append(
-            compute_surface_distances(labelled_2 == idx + 1, mask1)
+            compute_surface_distances(labelled_2 == idx + 1, mask1, voxel_dimensions)
         )
 
     return surface_distance_label_1, surface_distance_label_2

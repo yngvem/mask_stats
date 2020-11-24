@@ -26,7 +26,7 @@ class MaskFeatures:
 
 
 class MaskPairFeatures:
-    def __init__(self, mask1, mask2):
+    def __init__(self, mask1, mask2, voxel_dimensions=1):
         self.mask1_features = MaskFeatures(mask1)
         self.mask2_features = MaskFeatures(mask2)
         self.pairwise_overlap_matrix = compute_pairwise_overlaps(
@@ -52,6 +52,7 @@ class MaskPairFeatures:
             self.mask2_features.region_labelled_mask,
             self.mask1_features.num_objects,
             self.mask2_features.num_objects,
+            voxel_dimensions=voxel_dimensions,
         )
         self.mask1_labelled_surface_distances = out[0]
         self.mask2_labelled_surface_distances = out[1]
@@ -159,8 +160,8 @@ class OverallMetrics:
 
 
 class MaskPairEvaluator:
-    def __init__(self, mask1, mask2):
-        self.mask_pair_features = MaskPairFeatures(mask1, mask2)
+    def __init__(self, mask1, mask2, voxel_dimensions=1):
+        self.mask_pair_features = MaskPairFeatures(mask1, mask2, voxel_dimensions=voxel_dimensions)
         self.object_wise = ObjectWiseMetrics(self.mask_pair_features)
         self.overall = OverallMetrics(self.mask_pair_features, self.object_wise)
 
@@ -201,7 +202,7 @@ def _compute_nonoverlapping_means(object_wise_metrics, overlap_threshold):
 
 
 def compute_evaluations_for_mask_pairs(
-    mask_list_1, mask_list_2, overlap_threshold=0.5, show_progress=True
+    mask_list_1, mask_list_2, voxel_dimensions=1, overlap_threshold=0.5, show_progress=True
 ):
     object_wise_metrics_1 = defaultdict(list)
     object_wise_metrics_2 = defaultdict(list)
@@ -215,7 +216,7 @@ def compute_evaluations_for_mask_pairs(
         def progress(iterator):
             return iterator
     for pair_num, (mask1, mask2) in progress(enumerate(zip(mask_list_1, mask_list_2))):
-        evaluator = MaskPairEvaluator(mask1, mask2)
+        evaluator = MaskPairEvaluator(mask1, mask2, voxel_dimensions=voxel_dimensions)
 
         volumes1, volumes2 = evaluator.object_wise.compute_volumes()
         object_wise_metrics_1['volume'].extend(volumes1)
