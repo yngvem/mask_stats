@@ -3,7 +3,7 @@ from collections import Counter
 import numpy as np
 import pytest
 from scipy.spatial.distance import directed_hausdorff
-from scipy.ndimage import morphological_gradient, label
+from scipy.ndimage import morphological_gradient, label, zoom
 
 from mask_stats import compute_evaluations_for_mask_pairs
 
@@ -138,3 +138,17 @@ def test_labelled_hausdorff_distance_doubled_with_twice_voxel_size():
     
     for distance1, distance2 in zip(eval_mask2['object_wise']['hausdorff_distance'], eval_mask_sz2_2['object_wise']['hausdorff_distance']):
         assert 2*distance1 == distance2
+
+def test_anisotropic_voxel_hausdorff_distance():
+    eval_mask1, eval_mask2 = compute_evaluations_for_mask_pairs([TEMPLATE1], [TEMPLATE2], overlap_threshold=0.5, voxel_dimensions=(1, 2))
+
+    structuring_el_size = (3, 3)
+    grad1 = zoom(morphological_gradient(TEMPLATE1, size=structuring_el_size), (1, 2), order=0)
+    grad2 = zoom(morphological_gradient(TEMPLATE2, size=structuring_el_size), (1, 2), order=0)
+    grad1_nnz = np.array(np.nonzero(grad1)).T
+    grad2_nnz = np.array(np.nonzero(grad2)).T
+
+    hd_scipy1 = directed_hausdorff(grad1_nnz, grad2_nnz)[0]
+    assert hd_scipy1 == eval_mask1['overall']['hausdorff_distance'][0]
+    hd_scipy2 = directed_hausdorff(grad2_nnz, grad1_nnz)[0]
+    assert hd_scipy2 == eval_mask2['overall']['hausdorff_distance'][0]
